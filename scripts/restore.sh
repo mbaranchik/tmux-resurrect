@@ -38,7 +38,8 @@ check_saved_session_exists() {
 pane_exists() {
 	local session_name="$1"
 	local window_number="$2"
-	local pane_index="$3"
+        local pane_name="$3"
+	local pane_index="$4"
 	tmux list-panes -t "${session_name}:${window_number}" -F "#{pane_index}" 2>/dev/null |
 		\grep -q "^$pane_index$"
 }
@@ -126,30 +127,38 @@ pane_creation_command() {
 new_window() {
 	local session_name="$1"
 	local window_number="$2"
-	local dir="$3"
-	local pane_index="$4"
+        local pane_name="$3"
+	local dir="$4"
+	local pane_index="$5"
 	local pane_id="${session_name}:${window_number}.${pane_index}"
 	dir="${dir/#\~/$HOME}"
+        local real_pane_id=
 	if is_restoring_pane_contents && pane_contents_file_exists "$pane_id"; then
 		local pane_creation_command="$(pane_creation_command "$session_name" "$window_number" "$pane_index")"
-		tmux new-window -d -t "${session_name}:${window_number}" -c "$dir" "$pane_creation_command"
+		real_pane_id=$(tmux new-window -d -t "${session_name}:${window_number}" -c "$dir" -P -F "#{pane_id}" "$pane_creation_command")
 	else
-		tmux new-window -d -t "${session_name}:${window_number}" -c "$dir"
+		real_pane_id=$(tmux new-window -d -t "${session_name}:${window_number}" -c "$dir" -P -F "#{pane_id}")
 	fi
+        # restore pane-name
+        tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
 }
 
 new_session() {
 	local session_name="$1"
 	local window_number="$2"
-	local dir="$3"
-	local pane_index="$4"
+        local pane_name="$3"
+	local dir="$4"
+	local pane_index="$5"
 	local pane_id="${session_name}:${window_number}.${pane_index}"
+        local real_pane_id=
 	if is_restoring_pane_contents && pane_contents_file_exists "$pane_id"; then
 		local pane_creation_command="$(pane_creation_command "$session_name" "$window_number" "$pane_index")"
-		TMUX="" tmux -S "$(tmux_socket)" new-session -d -s "$session_name" -c "$dir" "$pane_creation_command"
+		real_pane_id=$(TMUX="" tmux -S "$(tmux_socket)" new-session -d -s "$session_name" -c "$dir" "$pane_creation_command")
 	else
-		TMUX="" tmux -S "$(tmux_socket)" new-session -d -s "$session_name" -c "$dir"
+		real_pane_id=$(TMUX="" tmux -S "$(tmux_socket)" new-session -d -s "$session_name" -c "$dir")
 	fi
+        # restore pane-name
+        tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
 	# change first window number if necessary
 	local created_window_num="$(first_window_num)"
 	if [ $created_window_num -ne $window_number ]; then
@@ -160,45 +169,49 @@ new_session() {
 new_pane() {
 	local session_name="$1"
 	local window_number="$2"
-	local dir="$3"
-	local pane_index="$4"
+        local pane_name="$3"
+	local dir="$4"
+	local pane_index="$5"
 	local pane_id="${session_name}:${window_number}.${pane_index}"
+        local real_pane_id=
 	if is_restoring_pane_contents && pane_contents_file_exists "$pane_id"; then
 		local pane_creation_command="$(pane_creation_command "$session_name" "$window_number" "$pane_index")"
-		tmux split-window -t "${session_name}:${window_number}" -c "$dir" "$pane_creation_command"
+		real_pane_id=$(tmux split-window -t "${session_name}:${window_number}" -c "$dir" -P -F "#{pane_id}" "$pane_creation_command")
 	else
-		tmux split-window -t "${session_name}:${window_number}" -c "$dir"
+		real_pane_id=$(tmux split-window -t "${session_name}:${window_number}" -c "$dir" -P -F "#{pane_id}")
 	fi
+        # restore pane-name
+        tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
 	# minimize window so more panes can fit
 	tmux resize-pane -t "${session_name}:${window_number}" -U "999"
 }
 
 restore_pane() {
 	local pane="$1"
-	while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_full_command; do
+	while IFS=$d read line_type session_name window_number pane_name window_active window_flags pane_index pane_title dir pane_active pane_command pane_full_command; do
 		dir="$(remove_first_char "$dir")"
 		pane_full_command="$(remove_first_char "$pane_full_command")"
 		if [ "$session_name" == "0" ]; then
 			restored_session_0_true
 		fi
-		if pane_exists "$session_name" "$window_number" "$pane_index"; then
+		if pane_exists "$session_name" "$window_number" "$pane_name" "$pane_index"; then
 			if is_restoring_from_scratch; then
 				# overwrite the pane
 				# happens only for the first pane if it's the only registered pane for the whole tmux server
 				local pane_id="$(tmux display-message -p -F "#{pane_id}" -t "$session_name:$window_number")"
-				new_pane "$session_name" "$window_number" "$dir" "$pane_index"
+				new_pane "$session_name" "$window_number" "$pane_name" "$dir" "$pane_index"
 				tmux kill-pane -t "$pane_id"
 			else
 				# Pane exists, no need to create it!
 				# Pane existence is registered. Later, its process also won't be restored.
-				register_existing_pane "$session_name" "$window_number" "$pane_index"
+				register_existing_pane "$session_name" "$window_number" "$pane_name" "$pane_index"
 			fi
 		elif window_exists "$session_name" "$window_number"; then
-			new_pane "$session_name" "$window_number" "$dir" "$pane_index"
+			new_pane "$session_name" "$window_number" "$pane_name" "$dir" "$pane_index"
 		elif session_exists "$session_name"; then
-			new_window "$session_name" "$window_number" "$dir" "$pane_index"
+			new_window "$session_name" "$window_number" "$pane_name" "$dir" "$pane_index"
 		else
-			new_session "$session_name" "$window_number" "$dir" "$pane_index"
+			new_session "$session_name" "$window_number" "$pane_name" "$dir" "$pane_index"
 		fi
 		# set pane title
 		tmux select-pane -t "$session_name:$window_number.$pane_index" -T "$pane_title"
@@ -365,6 +378,7 @@ cleanup_restored_pane_contents() {
 
 main() {
 	if supported_tmux_version_ok && check_saved_session_exists; then
+		touch ~/.tmux/restoring.lock
 		start_spinner "Restoring..." "Tmux restore complete!"
 		execute_hook "pre-restore-all"
 		restore_all_panes
@@ -382,6 +396,7 @@ main() {
 		execute_hook "post-restore-all"
 		stop_spinner
 		display_message "Tmux restore complete!"
+		rm ~/.tmux/restoring.lock || true
 	fi
 }
 main
