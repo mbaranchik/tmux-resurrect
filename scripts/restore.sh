@@ -124,6 +124,12 @@ pane_creation_command() {
 	echo "cat '$(pane_contents_file "restore" "${1}:${2}.${3}")'; exec $(tmux_default_command)"
 }
 
+restore_pane_name() {
+    # restore pane-name
+    tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
+    tmux send-keys -t "${real_pane_id}" 'source ~/bin/tmux_pane_renamer.sh' Enter
+}
+
 new_window() {
 	local session_name="$1"
 	local window_number="$2"
@@ -139,8 +145,7 @@ new_window() {
 	else
 		real_pane_id=$(tmux new-window -d -t "${session_name}:${window_number}" -c "$dir" -P -F "#{pane_id}")
 	fi
-        # restore pane-name
-        tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
+        restore_pane_name
 }
 
 new_session() {
@@ -157,8 +162,7 @@ new_session() {
 	else
 		real_pane_id=$(TMUX="" tmux -S "$(tmux_socket)" new-session -d -s "$session_name" -c "$dir")
 	fi
-        # restore pane-name
-        tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
+        restore_pane_name
 	# change first window number if necessary
 	local created_window_num="$(first_window_num)"
 	if [ $created_window_num -ne $window_number ]; then
@@ -180,8 +184,7 @@ new_pane() {
 	else
 		real_pane_id=$(tmux split-window -t "${session_name}:${window_number}" -c "$dir" -P -F "#{pane_id}")
 	fi
-        # restore pane-name
-        tmux set-option -p -t "${real_pane_id}" @pane-name "${pane_name}"
+        restore_pane_name
 	# minimize window so more panes can fit
 	tmux resize-pane -t "${session_name}:${window_number}" -U "999"
 }
